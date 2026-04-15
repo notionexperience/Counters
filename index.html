@@ -71,12 +71,6 @@
             background: #37352f;
         }
 
-        .log-container {
-            max-height: 120px;
-            overflow-y: auto;
-            mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
-        }
-
         /* Improved rename input visibility */
         .rename-input {
             background: transparent;
@@ -155,7 +149,7 @@
         const LOCAL_STORAGE_KEY = 'counters_pro_v3';
         let state = {
             counters: JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY)) || [
-                { id: Date.now(), title: 'Main Counter', value: 0, goal: 10, step: 1, allowNegative: false, logs: [] }
+                { id: Date.now(), title: 'Main Counter', value: 0, goal: 10, step: 1, allowNegative: false }
             ],
             isDarkMode: localStorage.getItem('theme') === 'dark',
             soundEnabled: true,
@@ -188,13 +182,6 @@
             } catch(e) {}
         };
 
-        const addLog = (counter, message) => {
-            const now = new Date();
-            const timeStr = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
-            counter.logs.unshift({ time: timeStr, msg: message });
-            if (counter.logs.length > 15) counter.logs.pop(); 
-        };
-
         const saveAndRefresh = () => {
             saveToStorage();
             render();
@@ -205,7 +192,6 @@
             const c = state.counters.find(x => x.id === id);
             if (!c) return;
             c.value += (c.step || 1);
-            addLog(c, `+${c.step || 1} (Total: ${c.value})`);
             playClickSound(440 + (c.value * 2));
             saveAndRefresh();
         };
@@ -220,7 +206,6 @@
             } else {
                 c.value -= step;
             }
-            addLog(c, `-${step} (Total: ${c.value})`);
             playClickSound(300);
             saveAndRefresh();
         };
@@ -231,8 +216,6 @@
                 const confirmed = confirm(`Reset "${c.title}" to zero?`);
                 if (confirmed) {
                     c.value = 0;
-                    c.logs = [];
-                    addLog(c, "Counter reset");
                     saveAndRefresh();
                 }
             }
@@ -244,9 +227,6 @@
             c.allowNegative = !c.allowNegative;
             if (!c.allowNegative && c.value < 0) {
                 c.value = 0;
-                addLog(c, "Negatives disabled; reset to 0");
-            } else {
-                addLog(c, `Negatives ${c.allowNegative ? 'enabled' : 'disabled'}`);
             }
             saveAndRefresh();
         };
@@ -314,21 +294,17 @@
                         </div>
                     ` : '<div class="h-1 mb-4"></div>'}
 
-                    <div class="text-6xl font-bold my-2 tabular-nums select-none">
+                    <div class="text-6xl font-bold my-4 tabular-nums select-none">
                         ${counter.value}
                         ${counter.goal > 0 ? `<span class="text-xs opacity-20 block text-center font-normal">Goal: ${counter.goal}</span>` : ''}
                     </div>
 
-                    <div class="flex flex-col w-full gap-4 mt-auto">
+                    <div class="flex flex-col w-full gap-6 mt-auto">
                         <div class="flex items-center justify-center gap-4">
                             <button onclick="handleDecrement(${counter.id})" class="btn-press w-12 h-12 flex items-center justify-center rounded-full border border-[var(--border-color)] hover:bg-[var(--hover-bg)] text-xl">-</button>
                             <button onclick="handleIncrement(${counter.id})" class="btn-press w-12 h-12 flex items-center justify-center rounded-full border border-[var(--border-color)] hover:bg-[var(--hover-bg)] text-xl">+</button>
                         </div>
                         
-                        <div class="log-container w-full text-[10px] opacity-40 space-y-1 py-2">
-                            ${counter.logs.length ? counter.logs.map(l => `<div><span class="font-bold">${l.time}</span> ${l.msg}</div>`).join('') : '<div class="text-center italic opacity-50">No activity yet</div>'}
-                        </div>
-
                         <div class="flex justify-between items-center pt-4 border-t border-[var(--border-color)] px-2">
                              <div class="flex gap-3">
                                 <button onclick="handleReset(${counter.id})" class="text-xs uppercase tracking-wider opacity-50 hover:opacity-100 font-medium">Reset</button>
@@ -369,8 +345,7 @@
                 value: 0,
                 goal: 0,
                 step: 1,
-                allowNegative: false,
-                logs: []
+                allowNegative: false
             });
             state.activeCounterId = newId;
             saveAndRefresh();
@@ -386,7 +361,6 @@
                 const newStep = Math.max(1, parseInt(document.getElementById('setStepInput').value) || 1);
                 
                 if (!c.allowNegative && newVal < 0) newVal = 0;
-                if (newVal !== c.value) addLog(c, `Set to ${newVal}`);
                 
                 c.value = newVal;
                 c.goal = newGoal;
