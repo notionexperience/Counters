@@ -101,7 +101,7 @@
 
     <!-- Main Grid -->
     <main id="countersGrid" class="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6 pb-20">
-        <!-- Counters will be injected here by JS -->
+        <!-- Counters injected here -->
     </main>
 
     <!-- Modal for Settings -->
@@ -125,7 +125,7 @@
             </div>
 
             <div class="flex justify-end gap-2 mt-6">
-                <button onclick="closeModal()" class="px-4 py-2 text-sm">Cancel</button>
+                <button id="cancelSettings" class="px-4 py-2 text-sm">Cancel</button>
                 <button id="confirmSettings" class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Apply Changes</button>
             </div>
         </div>
@@ -133,58 +133,138 @@
 
     <script>
         // --- State Management ---
+        const LOCAL_STORAGE_KEY = 'counters_pro_v3';
         let state = {
-            counters: JSON.parse(localStorage.getItem('counters_pro')) || [
-                { id: Date.now(), title: 'Main Counter', value: 0, goal: 10, step: 1, allowNegative: false, logs: [], lastUpdated: Date.now() }
+            counters: JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY)) || [
+                { id: Date.now(), title: 'Main Counter', value: 0, goal: 10, step: 1, allowNegative: false, logs: [] }
             ],
             isDarkMode: localStorage.getItem('theme') === 'dark',
             soundEnabled: true,
-            activeCounterId: null // For keyboard focus
+            activeCounterId: null
         };
 
         let activeEditingId = null;
 
-        // --- Audio Context for Feedback ---
-        const playClickSound = (freq = 440) => {
-            if (!state.soundEnabled) return;
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(freq, ctx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
-            
-            gain.gain.setValueAtTime(0.1, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
-            
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            
-            osc.start();
-            osc.stop(ctx.currentTime + 0.1);
+        // --- Utils ---
+        const saveToStorage = () => {
+            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state.counters));
+            localStorage.setItem('theme', state.isDarkMode ? 'dark' : 'light');
         };
 
-        // --- Functions ---
-        function saveToStorage() {
-            localStorage.setItem('counters_pro', JSON.stringify(state.counters));
-            localStorage.setItem('theme', state.isDarkMode ? 'dark' : 'light');
-        }
+        const playClickSound = (freq = 440) => {
+            if (!state.soundEnabled) return;
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.1, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.1);
+            } catch(e) {}
+        };
 
-        function toggleTheme() {
-            state.isDarkMode = !state.isDarkMode;
-            document.documentElement.classList.toggle('dark', state.isDarkMode);
-            document.getElementById('themeIcon').innerText = state.isDarkMode ? '☀️' : '🌙';
-            saveToStorage();
-        }
-
-        function addLog(counter, message) {
+        const addLog = (counter, message) => {
             const now = new Date();
             const timeStr = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
             counter.logs.unshift({ time: timeStr, msg: message });
-            if (counter.logs.length > 20) counter.logs.pop(); // Keep last 20
-        }
+            if (counter.logs.length > 15) counter.logs.pop(); 
+        };
 
+        const saveAndRefresh = () => {
+            saveToStorage();
+            render();
+        };
+
+        // --- Core Actions ---
+        window.handleIncrement = (id) => {
+            const c = state.counters.find(x => x.id === id);
+            if (!c) return;
+            c.value += (c.step || 1);
+            addLog(c, `+${c.step || 1} (Total: ${c.value})`);
+            playClickSound(440 + (c.value * 2));
+            saveAndRefresh();
+        };
+
+        window.handleDecrement = (id) => {
+            const c = state.counters.find(x => x.id === id);
+            if (!c) return;
+            const step = c.step || 1;
+            if (!c.allowNegative && c.value - step < 0) {
+                if (c.value === 0) return;
+                c.value = 0;
+            } else {
+                c.value -= step;
+            }
+            addLog(c, `-${step} (Total: ${c.value})`);
+            playClickSound(300);
+            saveAndRefresh();
+        };
+
+        window.handleReset = (id) => {
+            const c = state.counters.find(x => x.id === id);
+            if (c) {
+                const confirmed = confirm(`Reset "${c.title}" to zero?`);
+                if (confirmed) {
+                    c.value = 0;
+                    c.logs = [];
+                    addLog(c, "Counter reset");
+                    saveAndRefresh();
+                }
+            }
+        };
+
+        window.handleToggleNegative = (id) => {
+            const c = state.counters.find(x => x.id === id);
+            if (!c) return;
+            c.allowNegative = !c.allowNegative;
+            if (!c.allowNegative && c.value < 0) {
+                c.value = 0;
+                addLog(c, "Negatives disabled; reset to 0");
+            } else {
+                addLog(c, `Negatives ${c.allowNegative ? 'enabled' : 'disabled'}`);
+            }
+            saveAndRefresh();
+        };
+
+        window.handleRemove = (e, id) => {
+            e.stopPropagation();
+            if (state.counters.length === 1) return;
+            state.counters = state.counters.filter(x => x.id !== id);
+            if (state.activeCounterId === id) state.activeCounterId = state.counters[0].id;
+            saveAndRefresh();
+        };
+
+        window.handleTitleUpdate = (id, val) => {
+            const c = state.counters.find(x => x.id === id);
+            if (c) c.title = val || 'Untitled';
+            saveAndRefresh();
+        };
+
+        window.handleOpenSettings = (id) => {
+            activeEditingId = id;
+            const c = state.counters.find(x => x.id === id);
+            document.getElementById('setValInput').value = c.value;
+            document.getElementById('setGoalInput').value = c.goal || 0;
+            document.getElementById('setStepInput').value = c.step || 1;
+            
+            const modal = document.getElementById('settingsModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        };
+
+        const closeModal = () => {
+            document.getElementById('settingsModal').classList.add('hidden');
+            document.getElementById('settingsModal').classList.remove('flex');
+            activeEditingId = null;
+        };
+
+        // --- Render ---
         function render() {
             const grid = document.getElementById('countersGrid');
             grid.innerHTML = '';
@@ -199,47 +279,45 @@
                 card.onclick = () => { state.activeCounterId = counter.id; render(); };
                 
                 card.innerHTML = `
-                    <button onclick="removeCounter(${counter.id})" class="absolute top-4 right-4 text-xs opacity-30 hover:opacity-100 transition-opacity">✕</button>
+                    <button onclick="handleRemove(event, ${counter.id})" class="absolute top-4 right-4 text-xs opacity-30 hover:opacity-100 transition-opacity">✕</button>
                     
                     <div class="w-full mb-2">
                         <input type="text" value="${counter.title}" 
-                            onchange="updateTitle(${counter.id}, this.value)"
+                            onchange="handleTitleUpdate(${counter.id}, this.value)"
                             class="bg-transparent font-medium text-center w-full outline-none opacity-70 focus:opacity-100 transition-opacity"
                         >
                     </div>
 
-                    <!-- Progress Bar -->
                     ${counter.goal > 0 ? `
                         <div class="w-full h-1 bg-[var(--hover-bg)] rounded-full overflow-hidden mb-4">
                             <div class="progress-bar h-full bg-blue-500" style="width: ${progress}%"></div>
                         </div>
                     ` : '<div class="h-1 mb-4"></div>'}
 
-                    <div class="text-6xl font-bold my-2 tabular-nums select-none transition-all duration-75">
+                    <div class="text-6xl font-bold my-2 tabular-nums select-none">
                         ${counter.value}
                         ${counter.goal > 0 ? `<span class="text-xs opacity-20 block text-center font-normal">Goal: ${counter.goal}</span>` : ''}
                     </div>
 
                     <div class="flex flex-col w-full gap-4 mt-auto">
                         <div class="flex items-center justify-center gap-4">
-                            <button onclick="decrement(${counter.id})" class="btn-press w-12 h-12 flex items-center justify-center rounded-full border border-[var(--border-color)] hover:bg-[var(--hover-bg)] text-xl">-</button>
-                            <button onclick="increment(${counter.id})" class="btn-press w-12 h-12 flex items-center justify-center rounded-full border border-[var(--border-color)] hover:bg-[var(--hover-bg)] text-xl">+</button>
+                            <button onclick="handleDecrement(${counter.id})" class="btn-press w-12 h-12 flex items-center justify-center rounded-full border border-[var(--border-color)] hover:bg-[var(--hover-bg)] text-xl">-</button>
+                            <button onclick="handleIncrement(${counter.id})" class="btn-press w-12 h-12 flex items-center justify-center rounded-full border border-[var(--border-color)] hover:bg-[var(--hover-bg)] text-xl">+</button>
                         </div>
                         
-                        <!-- History Log -->
                         <div class="log-container w-full text-[10px] opacity-40 space-y-1 py-2">
-                            ${counter.logs.map(l => `<div><span class="font-bold">${l.time}</span> ${l.msg}</div>`).join('')}
+                            ${counter.logs.length ? counter.logs.map(l => `<div><span class="font-bold">${l.time}</span> ${l.msg}</div>`).join('') : '<div class="text-center italic opacity-50">No activity yet</div>'}
                         </div>
 
                         <div class="flex justify-between items-center pt-4 border-t border-[var(--border-color)] px-2">
                              <div class="flex gap-3">
-                                <button onclick="reset(${counter.id})" class="text-xs uppercase tracking-wider opacity-50 hover:opacity-100">Reset</button>
-                                <button onclick="openModal(${counter.id})" class="text-xs uppercase tracking-wider opacity-50 hover:opacity-100">Settings</button>
+                                <button onclick="handleReset(${counter.id})" class="text-xs uppercase tracking-wider opacity-50 hover:opacity-100 font-medium">Reset</button>
+                                <button onclick="handleOpenSettings(${counter.id})" class="text-xs uppercase tracking-wider opacity-50 hover:opacity-100 font-medium">Settings</button>
                              </div>
                              
-                             <label class="flex items-center gap-2 cursor-pointer select-none">
+                             <label class="flex items-center gap-2 cursor-pointer select-none" onclick="event.stopPropagation()">
                                 <input type="checkbox" ${counter.allowNegative ? 'checked' : ''} 
-                                    onchange="toggleNegative(${counter.id})"
+                                    onchange="handleToggleNegative(${counter.id})"
                                     class="w-3 h-3 accent-current">
                                 <span class="text-[10px] uppercase tracking-tighter opacity-40">Neg</span>
                              </label>
@@ -250,116 +328,20 @@
             });
         }
 
-        // --- Logic Handlers ---
-        window.increment = (id) => {
-            const c = state.counters.find(x => x.id === id);
-            c.value += (c.step || 1);
-            addLog(c, `+${c.step || 1} (Total: ${c.value})`);
-            playClickSound(440 + (c.value * 2)); // Dynamic pitch
-            saveAndRefresh();
-        };
-
-        window.decrement = (id) => {
-            const c = state.counters.find(x => x.id === id);
-            const step = c.step || 1;
-            if (!c.allowNegative && c.value - step < 0) {
-                c.value = 0;
-            } else {
-                c.value -= step;
-            }
-            addLog(c, `-${step} (Total: ${c.value})`);
-            playClickSound(300);
-            saveAndRefresh();
-        };
-
-        window.reset = (id) => {
-            const c = state.counters.find(x => x.id === id);
-            if (confirm(`Reset "${c.title}"?`)) {
-                c.value = 0;
-                c.logs = [];
-                saveAndRefresh();
-            }
-        };
-
-        window.updateTitle = (id, val) => {
-            state.counters.find(x => x.id === id).title = val || 'Untitled';
-            saveAndRefresh();
-        };
-
-        window.toggleNegative = (id) => {
-            const c = state.counters.find(x => x.id === id);
-            c.allowNegative = !c.allowNegative;
-            if (!c.allowNegative && c.value < 0) c.value = 0;
-            saveAndRefresh();
-        };
-
-        window.removeCounter = (id) => {
-            if (state.counters.length === 1) return;
-            state.counters = state.counters.filter(x => x.id !== id);
-            if (state.activeCounterId === id) state.activeCounterId = state.counters[0].id;
-            saveAndRefresh();
-        };
-
-        function saveAndRefresh() {
+        // --- Global Listeners ---
+        document.getElementById('themeToggle').onclick = () => {
+            state.isDarkMode = !state.isDarkMode;
+            document.documentElement.classList.toggle('dark', state.isDarkMode);
+            document.getElementById('themeIcon').innerText = state.isDarkMode ? '☀️' : '🌙';
             saveToStorage();
-            render();
-        }
-
-        // --- Modal Control ---
-        window.openModal = (id) => {
-            activeEditingId = id;
-            const c = state.counters.find(x => x.id === id);
-            document.getElementById('setValInput').value = c.value;
-            document.getElementById('setGoalInput').value = c.goal || 0;
-            document.getElementById('setStepInput').value = c.step || 1;
-            
-            const modal = document.getElementById('settingsModal');
-            modal.classList.remove('hidden');
-            modal.classList.add('flex');
         };
 
-        window.closeModal = () => {
-            document.getElementById('settingsModal').classList.add('hidden');
-            document.getElementById('settingsModal').classList.remove('flex');
-            activeEditingId = null;
+        document.getElementById('toggleSound').onclick = () => {
+            state.soundEnabled = !state.soundEnabled;
+            document.getElementById('soundIcon').innerText = state.soundEnabled ? '🔊' : '🔇';
         };
 
-        // --- Keyboard Shortcuts ---
-        document.addEventListener('keydown', (e) => {
-            // Ignore if user is typing in an input
-            if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
-
-            const activeId = state.activeCounterId || (state.counters[0] ? state.counters[0].id : null);
-            if (!activeId) return;
-
-            switch(e.code) {
-                case 'Space':
-                    e.preventDefault();
-                    increment(activeId);
-                    break;
-                case 'ArrowUp':
-                    e.preventDefault();
-                    increment(activeId);
-                    break;
-                case 'ArrowDown':
-                    e.preventDefault();
-                    decrement(activeId);
-                    break;
-                case 'ArrowRight':
-                case 'ArrowLeft':
-                    // Cycle active counter
-                    const idx = state.counters.findIndex(c => c.id === activeId);
-                    const nextIdx = e.code === 'ArrowRight' ? (idx + 1) % state.counters.length : (idx - 1 + state.counters.length) % state.counters.length;
-                    state.activeCounterId = state.counters[nextIdx].id;
-                    render();
-                    break;
-            }
-        });
-
-        // --- Event Listeners ---
-        document.getElementById('themeToggle').addEventListener('click', toggleTheme);
-        
-        document.getElementById('addCounter').addEventListener('click', () => {
+        document.getElementById('addCounter').onclick = () => {
             const newId = Date.now();
             state.counters.push({
                 id: newId,
@@ -372,30 +354,55 @@
             });
             state.activeCounterId = newId;
             saveAndRefresh();
-        });
+        };
 
-        document.getElementById('toggleSound').addEventListener('click', () => {
-            state.soundEnabled = !state.soundEnabled;
-            document.getElementById('soundIcon').innerText = state.soundEnabled ? '🔊' : '🔇';
-        });
+        document.getElementById('cancelSettings').onclick = closeModal;
 
-        document.getElementById('confirmSettings').addEventListener('click', () => {
+        document.getElementById('confirmSettings').onclick = () => {
             const c = state.counters.find(x => x.id === activeEditingId);
             if (c) {
-                const newVal = parseInt(document.getElementById('setValInput').value) || 0;
-                const newGoal = parseInt(document.getElementById('setGoalInput').value) || 0;
-                const newStep = parseInt(document.getElementById('setStepInput').value) || 1;
+                let newVal = parseInt(document.getElementById('setValInput').value) || 0;
+                const newGoal = Math.max(0, parseInt(document.getElementById('setGoalInput').value) || 0);
+                const newStep = Math.max(1, parseInt(document.getElementById('setStepInput').value) || 1);
                 
-                if (newVal !== c.value) addLog(c, `Set value to ${newVal}`);
+                if (!c.allowNegative && newVal < 0) newVal = 0;
+                if (newVal !== c.value) addLog(c, `Set to ${newVal}`);
+                
                 c.value = newVal;
                 c.goal = newGoal;
                 c.step = newStep;
             }
             closeModal();
             saveAndRefresh();
-        });
+        };
 
-        // Initialize
+        document.onkeydown = (e) => {
+            if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+            const activeId = state.activeCounterId || (state.counters[0]?.id);
+            if (!activeId) return;
+
+            switch(e.code) {
+                case 'Space':
+                case 'ArrowUp':
+                    e.preventDefault();
+                    handleIncrement(activeId);
+                    break;
+                case 'ArrowDown':
+                    e.preventDefault();
+                    handleDecrement(activeId);
+                    break;
+                case 'ArrowRight':
+                case 'ArrowLeft':
+                    const idx = state.counters.findIndex(c => c.id === activeId);
+                    const offset = e.code === 'ArrowRight' ? 1 : -1;
+                    const nextIdx = (idx + offset + state.counters.length) % state.counters.length;
+                    state.activeCounterId = state.counters[nextIdx].id;
+                    render();
+                    break;
+            }
+        };
+
+        // Init
         if (state.isDarkMode) {
             document.documentElement.classList.add('dark');
             document.getElementById('themeIcon').innerText = '☀️';
